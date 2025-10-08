@@ -3,13 +3,16 @@
 Usage:
 python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fastchat-t5-3b-v1.0
 """
+
 import argparse
 import json
 import os
+
 script_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(script_dir)
-#os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 from accelerate.utils import set_seed
+
 set_seed(0)
 
 import time
@@ -28,22 +31,21 @@ except:
     from eagle.model.utils import *
 
 
-
 def run_eval(
-        base_model_path,
-        ea_model_path,
-        model_id,
-        question_file,
-        question_begin,
-        question_end,
-        answer_file,
-        max_new_token,
-        num_choices,
-        num_gpus_per_model,
-        num_gpus_total,
-        max_gpu_memory,
-        temperature,
-        args
+    base_model_path,
+    ea_model_path,
+    model_id,
+    question_file,
+    question_begin,
+    question_end,
+    answer_file,
+    max_new_token,
+    num_choices,
+    num_gpus_per_model,
+    num_gpus_total,
+    max_gpu_memory,
+    temperature,
+    args,
 ):
     questions = load_questions(question_file, question_begin, question_end)
     # random shuffle the questions to balance the loading
@@ -71,14 +73,14 @@ def run_eval(
                 base_model_path,
                 ea_model_path,
                 model_id,
-                questions[i: i + chunk_size],
+                questions[i : i + chunk_size],
                 answer_file,
                 max_new_token,
                 num_choices,
                 num_gpus_per_model,
                 max_gpu_memory,
                 temperature,
-                args
+                args,
             )
         )
 
@@ -88,17 +90,17 @@ def run_eval(
 
 @torch.inference_mode()
 def get_model_answers(
-        base_model_path,
-        ea_model_path,
-        model_id,
-        questions,
-        answer_file,
-        max_new_token,
-        num_choices,
-        num_gpus_per_model,
-        max_gpu_memory,
-        temperature,
-        args
+    base_model_path,
+    ea_model_path,
+    model_id,
+    questions,
+    answer_file,
+    max_new_token,
+    num_choices,
+    num_gpus_per_model,
+    max_gpu_memory,
+    temperature,
+    args,
 ):
     # temperature = 0.0
 
@@ -111,7 +113,7 @@ def get_model_answers(
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
         # load_in_8bit=True,
-        device_map="auto"
+        device_map="auto",
     )
 
     tokenizer = model.get_tokenizer()
@@ -122,10 +124,10 @@ def get_model_answers(
         logits_processor = None
 
     model.eval()
-    print('Check model training state:', model.training)
+    print("Check model training state:", model.training)
 
-    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
-    print('CUDA VISIBLE DEVICES:', cuda_visible_devices)
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    print("CUDA VISIBLE DEVICES:", cuda_visible_devices)
 
     question = questions[0]
 
@@ -134,8 +136,10 @@ def get_model_answers(
         torch.manual_seed(0)
 
         messages = [
-            {"role": "system",
-             "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
+            {
+                "role": "system",
+                "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.",
+            },
         ]
         turns = []
         idxs = []
@@ -143,16 +147,16 @@ def get_model_answers(
         wall_time = []
         for j in range(len(question["turns"])):
             qs = question["turns"][j]
-            messages.append({
-                "role": "user",
-                "content": qs
-            })
+            messages.append({"role": "user", "content": qs})
             prompt = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
             )
-            input_ids = tokenizer([prompt],add_special_tokens=False,).input_ids
+            input_ids = tokenizer(
+                [prompt],
+                add_special_tokens=False,
+            ).input_ids
 
             # try:
             torch.cuda.synchronize()
@@ -166,18 +170,16 @@ def get_model_answers(
             )
             torch.cuda.synchronize()
             total_time = time.time() - start_time
-            output_ids = output_ids[0][len(input_ids[0]):]
+            output_ids = output_ids[0][len(input_ids[0]) :]
             # be consistent with the template's stop_token_ids
             stop_token_ids = [
                 tokenizer.eos_token_id,
-                tokenizer.convert_tokens_to_ids("<|eot_id|>")
+                tokenizer.convert_tokens_to_ids("<|eot_id|>"),
             ]
 
             if stop_token_ids:
                 stop_token_ids_index = [
-                    i
-                    for i, id in enumerate(output_ids)
-                    if id in stop_token_ids
+                    i for i, id in enumerate(output_ids) if id in stop_token_ids
                 ]
                 if len(stop_token_ids_index) > 0:
                     output_ids = output_ids[: stop_token_ids_index[0]]
@@ -197,17 +199,12 @@ def get_model_answers(
                     output = output.replace(special_token, "")
             output = output.strip()
 
-
-
             turns.append(output)
             idxs.append(int(idx))
             new_tokens.append(int(new_token))
             wall_time.append(total_time)
-            messages.append({
-                "role": "assistant",
-                "content": output
-            })
-    print('Warmup done')
+            messages.append({"role": "assistant", "content": output})
+    print("Warmup done")
 
     # questions=questions[6:]
     for question in tqdm(questions):
@@ -216,8 +213,10 @@ def get_model_answers(
         for i in range(num_choices):
             torch.manual_seed(i)
             messages = [
-                {"role": "system",
-                 "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.",
+                },
             ]
             turns = []
             idxs = []
@@ -225,16 +224,16 @@ def get_model_answers(
             wall_time = []
             for j in range(len(question["turns"])):
                 qs = question["turns"][j]
-                messages.append({
-                    "role": "user",
-                    "content": qs
-                })
+                messages.append({"role": "user", "content": qs})
                 prompt = tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
                     add_generation_prompt=True,
                 )
-                input_ids = tokenizer([prompt], add_special_tokens=False, ).input_ids
+                input_ids = tokenizer(
+                    [prompt],
+                    add_special_tokens=False,
+                ).input_ids
 
                 # try:
                 torch.cuda.synchronize()
@@ -248,18 +247,16 @@ def get_model_answers(
                 )
                 torch.cuda.synchronize()
                 total_time = time.time() - start_time
-                output_ids = output_ids[0][len(input_ids[0]):]
+                output_ids = output_ids[0][len(input_ids[0]) :]
                 # be consistent with the template's stop_token_ids
                 stop_token_ids = [
                     tokenizer.eos_token_id,
-                    tokenizer.convert_tokens_to_ids("<|eot_id|>")
+                    tokenizer.convert_tokens_to_ids("<|eot_id|>"),
                 ]
 
                 if stop_token_ids:
                     stop_token_ids_index = [
-                        i
-                        for i, id in enumerate(output_ids)
-                        if id in stop_token_ids
+                        i for i, id in enumerate(output_ids) if id in stop_token_ids
                     ]
                     if len(stop_token_ids_index) > 0:
                         output_ids = output_ids[: stop_token_ids_index[0]]
@@ -283,12 +280,17 @@ def get_model_answers(
                 idxs.append(int(idx))
                 new_tokens.append(int(new_token))
                 wall_time.append(total_time)
-                messages.append({
-                    "role": "assistant",
-                    "content": output
-                })
+                messages.append({"role": "assistant", "content": output})
             # torch.cuda.empty_cache()
-            choices.append({"index": i, "turns": turns, "idxs": idxs, "new_tokens": new_tokens, "wall_time": wall_time})
+            choices.append(
+                {
+                    "index": i,
+                    "turns": turns,
+                    "idxs": idxs,
+                    "new_tokens": new_tokens,
+                    "wall_time": wall_time,
+                }
+            )
 
         # Dump answers
         os.makedirs(os.path.dirname(answer_file), exist_ok=True)
@@ -325,8 +327,12 @@ if __name__ == "__main__":
         default="/home/lyh/weights/hf/eagle3/llama33chat/70B/",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/llama33chat/70B/",
-                        help="1")
+    parser.add_argument(
+        "--base-model-path",
+        type=str,
+        default="/home/lyh/weights/llama33chat/70B/",
+        help="1",
+    )
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"
     )
@@ -336,6 +342,12 @@ if __name__ == "__main__":
         type=str,
         default="mt_bench",
         help="The name of the benchmark question set.",
+    )
+    parser.add_argument(
+        "--question-file",
+        type=str,
+        default="questions.jsonl",
+        help="The path to the question file.",
     )
     parser.add_argument(
         "--question-begin",
@@ -412,7 +424,11 @@ if __name__ == "__main__":
 
         ray.init()
 
-    question_file = f"{parent_dir}/data/{args.bench_name}/question.jsonl"
+    if args.question_file:
+        question_file = args.question_file
+    else:
+        question_file = f"{parent_dir}/data/{args.bench_name}/question.jsonl"
+
     if args.answer_file:
         answer_file = args.answer_file
     else:
@@ -434,7 +450,7 @@ if __name__ == "__main__":
         args.num_gpus_total,
         args.max_gpu_memory,
         args.temperature,
-        args
+        args,
     )
 
     reorg_answer_file(answer_file)
