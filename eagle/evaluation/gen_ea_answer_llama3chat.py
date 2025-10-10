@@ -21,6 +21,8 @@ import shortuuid
 from fastchat.llm_judge.common import load_questions
 from tqdm import tqdm
 
+from ..pydantic_models import EvalPrompt
+
 try:
     from ..model.ea_model import EaModel
     from ..model.kv_cache import initialize_past_key_values
@@ -131,6 +133,7 @@ def get_model_answers(
     print("CUDA VISIBLE DEVICES:", cuda_visible_devices)
 
     question = questions[0]
+    question = EvalPrompt(**question)
 
     # warmup
     for _ in range(3):
@@ -146,8 +149,8 @@ def get_model_answers(
         idxs = []
         new_tokens = []
         wall_time = []
-        for j in range(len(question["turns"])):
-            qs = question["turns"][j]
+        for j in range(len(question.turns)):
+            qs = question.turns[j]
             messages.append({"role": "user", "content": qs})
             prompt = tokenizer.apply_chat_template(
                 messages,
@@ -209,7 +212,7 @@ def get_model_answers(
 
     # questions=questions[6:]
     for question in tqdm(questions):
-
+        question = EvalPrompt(**question)
         choices = []
         for i in range(num_choices):
             torch.manual_seed(i)
@@ -223,65 +226,64 @@ def get_model_answers(
             idxs = []
             new_tokens = []
             wall_time = []
-            for j in range(len(question["turns"])):
-                qs = question["turns"][j]
-                messages.append({"role": "user", "content": qs})
-                prompt = tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                input_ids = tokenizer(
-                    [prompt],
-                    add_special_tokens=False,
-                ).input_ids
+            for j in range(len(question.turns)):
+                messages.append(question.turns[j].model_dump())
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            input_ids = tokenizer(
+                [prompt],
+                add_special_tokens=False,
+            ).input_ids
 
-                # try:
-                torch.cuda.synchronize()
-                start_time = time.time()
+            # try:
+            torch.cuda.synchronize()
+            start_time = time.time()
 
-                output_ids, new_token, idx = model.eagenerate(
-                    torch.as_tensor(input_ids).cuda(),
-                    temperature=temperature,
-                    log=True,
-                    is_llama3=True,
-                )
-                torch.cuda.synchronize()
-                total_time = time.time() - start_time
-                output_ids = output_ids[0][len(input_ids[0]) :]
-                # be consistent with the template's stop_token_ids
-                stop_token_ids = [
-                    tokenizer.eos_token_id,
-                    tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+            output_ids, new_token, idx = model.eagenerate(
+                torch.as_tensor(input_ids).cuda(),
+                temperature=temperature,
+                log=True,
+                is_llama3=True,
+            )
+            torch.cuda.synchronize()
+            total_time = time.time() - start_time
+            output_ids = output_ids[0][len(input_ids[0]) :]
+            # be consistent with the template's stop_token_ids
+            stop_token_ids = [
+                tokenizer.eos_token_id,
+                tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+            ]
+
+            if stop_token_ids:
+                stop_token_ids_index = [
+                    i for i, id in enumerate(output_ids) if id in stop_token_ids
                 ]
+                if len(stop_token_ids_index) > 0:
+                    output_ids = output_ids[: stop_token_ids_index[0]]
 
-                if stop_token_ids:
-                    stop_token_ids_index = [
-                        i for i, id in enumerate(output_ids) if id in stop_token_ids
-                    ]
-                    if len(stop_token_ids_index) > 0:
-                        output_ids = output_ids[: stop_token_ids_index[0]]
+            output = tokenizer.decode(
+                output_ids,
+                spaces_between_special_tokens=False,
+            )
+            # stop_str = "</s>"
+            # if stop_str and output.find(stop_str) > 0:
+            #     output = output[: output.find(stop_str)]
+            for special_token in tokenizer.special_tokens_map.values():
+                if isinstance(special_token, list):
+                    for special_tok in special_token:
+                        output = output.replace(special_tok, "")
+                else:
+                    output = output.replace(special_token, "")
+            output = output.strip()
 
-                output = tokenizer.decode(
-                    output_ids,
-                    spaces_between_special_tokens=False,
-                )
-                # stop_str = "</s>"
-                # if stop_str and output.find(stop_str) > 0:
-                #     output = output[: output.find(stop_str)]
-                for special_token in tokenizer.special_tokens_map.values():
-                    if isinstance(special_token, list):
-                        for special_tok in special_token:
-                            output = output.replace(special_tok, "")
-                    else:
-                        output = output.replace(special_token, "")
-                output = output.strip()
-
-                turns.append(output)
-                idxs.append(int(idx))
-                new_tokens.append(int(new_token))
-                wall_time.append(total_time)
-                messages.append({"role": "assistant", "content": output})
+            turns.append(output)
+            idxs.append(int(idx))
+            new_tokens.append(int(new_token))
+            wall_time.append(total_time)
+            messages.append({"role": "assistant", "content": output})
             # torch.cuda.empty_cache()
             choices.append(
                 {
@@ -297,7 +299,7 @@ def get_model_answers(
         os.makedirs(os.path.dirname(answer_file), exist_ok=True)
         with open(os.path.expanduser(answer_file), "a") as fout:
             ans_json = {
-                "question_id": question["question_id"],
+                "question_id": question.question_id,
                 "answer_id": shortuuid.uuid(),
                 "model_id": model_id,
                 "choices": choices,
