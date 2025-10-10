@@ -2,7 +2,7 @@ from typing import List
 
 from pydantic import BaseModel
 
-from pydantic_models.ConversationRound import ConversationRound
+from .ConversationRound import ConversationRound
 
 
 class EvalPrompt(BaseModel):
