@@ -114,7 +114,7 @@ def get_model_answers(
         top_k=args.top_k,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
-        # load_in_8bit=True,
+        load_in_8bit=args.load_in_8bit,
         device_map="auto",
         use_eagle3=args.use_eagle3,
     )
