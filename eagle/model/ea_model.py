@@ -1,40 +1,41 @@
-import copy
 import json
+import os
 import time
 
 import torch
 import torch.nn as nn
 from huggingface_hub import hf_hub_download
-from transformers import AutoTokenizer
-import os
-from transformers import PreTrainedModel, PretrainedConfig, AutoConfig
-
-from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
-from .modeling_mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
-#from .modeling_qwen2_kv import LlamaForCausalLM as KVQwen2ForCausalLM
-from .modeling_qwen2_kv import Qwen2ForCausalLM as KVQwen2ForCausalLM
-from .modeling_qwen3_kv import Qwen3ForCausalLM as KVQwen3ForCausalLM
-from .utils import *
-from .kv_cache import initialize_past_key_values
+from transformers import AutoConfig, AutoTokenizer, LlamaConfig
+from transformers.utils import logging
 
 from .cnets import Model
 from .cnets1 import Model as Model1
 from .configs import EConfig
+from .kv_cache import initialize_past_key_values
+from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
+from .modeling_mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
+
+# from .modeling_qwen2_kv import LlamaForCausalLM as KVQwen2ForCausalLM
+from .modeling_qwen2_kv import Qwen2ForCausalLM as KVQwen2ForCausalLM
+from .modeling_qwen3_kv import Qwen3ForCausalLM as KVQwen3ForCausalLM
+from .utils import *
+
+logger = logging.get_logger(__name__)
 
 
 class EaModel(nn.Module):
 
     def __init__(
-            self,
-            use_eagle3,
-            base_model,
-            base_model_name_or_path,
-            ea_model_path,
-            total_token,
-            depth,
-            top_k,
-            threshold,
-            ea_layer_state_dict,
+        self,
+        use_eagle3,
+        base_model,
+        base_model_name_or_path,
+        ea_model_path,
+        total_token,
+        depth,
+        top_k,
+        threshold,
+        ea_layer_state_dict,
     ):
 
         super().__init__()
@@ -43,7 +44,9 @@ class EaModel(nn.Module):
         self.hidden_size = base_model.lm_head.weight.shape[-1]
         self.vocab_size = base_model.lm_head.weight.shape[0]
         self.base_model_name_or_path = base_model_name_or_path
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path, use_fast=False)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.base_model_name_or_path, use_fast=False
+        )
         self.use_eagle3 = use_eagle3
         config = EConfig.from_pretrained(ea_model_path)
         with open(ea_model_path, "r") as f:
@@ -53,11 +56,27 @@ class EaModel(nn.Module):
         except:
             bias = True
         if use_eagle3:
-            self.ea_layer = Model(config, bias=bias, total_tokens=total_token, depth=depth, top_k=top_k,
-                                  threshold=threshold, path=base_model_name_or_path,load_emb=True)
+            self.ea_layer = Model(
+                config,
+                bias=bias,
+                total_tokens=total_token,
+                depth=depth,
+                top_k=top_k,
+                threshold=threshold,
+                path=base_model_name_or_path,
+                load_emb=True,
+            )
         else:
-            self.ea_layer = Model1(config, bias=bias, total_tokens=total_token, depth=depth, top_k=top_k,
-                                  threshold=threshold, path=base_model_name_or_path,load_emb=True)
+            self.ea_layer = Model1(
+                config,
+                bias=bias,
+                total_tokens=total_token,
+                depth=depth,
+                top_k=top_k,
+                threshold=threshold,
+                path=base_model_name_or_path,
+                load_emb=True,
+            )
 
         low_memory = False
 
@@ -71,9 +90,9 @@ class EaModel(nn.Module):
 
         else:
             self.ea_layer.diff_device = False
-        if self.use_eagle3 and config.vocab_size==config.draft_vocab_size:
-            del self.ea_layer.d2t,self.ea_layer.t2d
-        load_=self.ea_layer.load_state_dict(ea_layer_state_dict, strict=False)
+        if self.use_eagle3 and config.vocab_size == config.draft_vocab_size:
+            del self.ea_layer.d2t, self.ea_layer.t2d
+        load_ = self.ea_layer.load_state_dict(ea_layer_state_dict, strict=False)
         self.ea_layer.to(self.base_model.dtype).to(device)
         self.ea_layer.init_tree()
 
@@ -87,35 +106,27 @@ class EaModel(nn.Module):
 
     @classmethod
     def from_pretrained(
-            cls,
-            use_eagle3=True,
-            base_model_path=None,
-            ea_model_path=None,
-            total_token=60,
-            depth=7,
-            top_k=10,
-            threshold=1.0,
-            **kwargs,
+        cls,
+        use_eagle3=True,
+        base_model_path=None,
+        ea_model_path=None,
+        total_token=60,
+        depth=7,
+        top_k=10,
+        threshold=1.0,
+        **kwargs,
     ):
         # assert Type=="LLaMA" or "Mixtral"
         Type = AutoConfig.from_pretrained(base_model_path).architectures[0]
 
-        if Type == 'LlamaForCausalLM':
-            base_model = KVLlamaForCausalLM.from_pretrained(
-                base_model_path, **kwargs
-            )
-        elif Type == 'Qwen2ForCausalLM':
-            base_model = KVQwen2ForCausalLM.from_pretrained(
-                base_model_path, **kwargs
-            )
-        elif Type == 'Qwen3ForCausalLM':
-            base_model = KVQwen3ForCausalLM.from_pretrained(
-                base_model_path, **kwargs
-            )
+        if Type == "LlamaForCausalLM":
+            base_model = KVLlamaForCausalLM.from_pretrained(base_model_path, **kwargs)
+        elif Type == "Qwen2ForCausalLM":
+            base_model = KVQwen2ForCausalLM.from_pretrained(base_model_path, **kwargs)
+        elif Type == "Qwen3ForCausalLM":
+            base_model = KVQwen3ForCausalLM.from_pretrained(base_model_path, **kwargs)
         else:
-            base_model = KVMixtralForCausalLM.from_pretrained(
-                base_model_path, **kwargs
-            )
+            base_model = KVMixtralForCausalLM.from_pretrained(base_model_path, **kwargs)
 
         configpath = os.path.join(ea_model_path, "config.json")
         if not os.path.exists(configpath):
@@ -125,10 +136,12 @@ class EaModel(nn.Module):
             load_model_path = os.path.join(ea_model_path, "pytorch_model.bin")
             if not os.path.exists(load_model_path):
                 load_model_path = hf_hub_download(ea_model_path, "pytorch_model.bin")
-            ea_layer_state_dict = torch.load(load_model_path,
-                                             map_location=base_model.device)
+            ea_layer_state_dict = torch.load(
+                load_model_path, map_location=base_model.device
+            )
         except:
             from safetensors.torch import load_file
+
             load_model_path = os.path.join(ea_model_path, "model.safetensors")
             if not os.path.exists(load_model_path):
                 load_model_path = hf_hub_download(ea_model_path, "model.safetensors")
@@ -142,7 +155,7 @@ class EaModel(nn.Module):
             depth,
             top_k,
             threshold,
-            ea_layer_state_dict
+            ea_layer_state_dict,
         )
 
         if total_token == -1:
@@ -153,7 +166,9 @@ class EaModel(nn.Module):
 
             for i in range(len(cans)):
                 length = cans[i]
-                input_ids = torch.randint(0, model.config.vocab_size - 200, (1, length)).to(device)
+                input_ids = torch.randint(
+                    0, model.config.vocab_size - 200, (1, length)
+                ).to(device)
                 torch.cuda.synchronize()
                 start_time = time.time()
                 for _ in range(20):
@@ -170,12 +185,12 @@ class EaModel(nn.Module):
         return model
 
     def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            past_key_values=None,
-            output_orig=False,
-            position_ids=None,
+        self,
+        input_ids=None,
+        attention_mask=None,
+        past_key_values=None,
+        output_orig=False,
+        position_ids=None,
     ):
 
         with torch.inference_mode():
@@ -197,23 +212,23 @@ class EaModel(nn.Module):
 
     @torch.no_grad()
     def eagenerate(
-            self,
-            input_ids,
-            temperature=0.0,
-            top_p=0.0,
-            top_k=0.0,
-            max_new_tokens=512,
-            max_length=2048,
-            log=False,
-            is_llama3=False,
-
+        self,
+        input_ids,
+        temperature=0.0,
+        top_p=0.0,
+        top_k=0.0,
+        max_new_tokens=512,
+        max_length=2048,
+        log=False,
+        is_llama3=False,
     ):
         if is_llama3:
             stop_token_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
 
-
         if temperature > 1e-5:
-            logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
+            logits_processor = prepare_logits_processor(
+                temperature=temperature, top_p=top_p, top_k=top_k
+            )
         else:
             logits_processor = None
         # assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -231,11 +246,15 @@ class EaModel(nn.Module):
             # Reset the past key and value states
             current_length_data.zero_()
         else:
+            estimated_max_length = self._estimate_max_length()
+            if estimated_max_length is not None:
+                max_length = estimated_max_length
+                logger.info(f"Estimated max length set to {max_length}")
             (
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model,max_length=max_length)
+            ) = initialize_past_key_values(self.base_model, max_length=max_length)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
@@ -243,9 +262,15 @@ class EaModel(nn.Module):
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
         # prefill
-        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, past_key_values, logits_processor
-        )
+        (
+            draft_tokens,
+            retrieve_indices,
+            tree_mask,
+            tree_position_ids,
+            logits,
+            hidden_state,
+            sample_token,
+        ) = initialize_tree(input_ids, self, past_key_values, logits_processor)
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
         for idx in range(max_length):
@@ -272,7 +297,16 @@ class EaModel(nn.Module):
             )
             # print(accept_length)
             # Adjusting the input sequence, draft model forward
-            input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token, hidden_state, sample_token = update_inference_inputs(
+            (
+                input_ids,
+                draft_tokens,
+                retrieve_indices,
+                tree_mask,
+                tree_position_ids,
+                new_token,
+                hidden_state,
+                sample_token,
+            ) = update_inference_inputs(
                 input_ids,
                 candidates,
                 best_candidate,
@@ -284,7 +318,7 @@ class EaModel(nn.Module):
                 current_length_data,
                 self,
                 hidden_state_new,
-                sample_p
+                sample_p,
             )
 
             if is_llama3:
@@ -304,23 +338,23 @@ class EaModel(nn.Module):
 
     @torch.no_grad()
     def naivegenerate(
-            self,
-            input_ids,
-            temperature=0.0,
-            top_p=0.0,
-            top_k=0.0,
-            max_new_tokens=512,
-            max_length=2048,
-            log=False,
-            is_llama3=False,
-
+        self,
+        input_ids,
+        temperature=0.0,
+        top_p=0.0,
+        top_k=0.0,
+        max_new_tokens=512,
+        max_length=2048,
+        log=False,
+        is_llama3=False,
     ):
         if is_llama3:
             stop_token_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
 
-
         if temperature > 1e-5:
-            logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
+            logits_processor = prepare_logits_processor(
+                temperature=temperature, top_p=top_p, top_k=top_k
+            )
         else:
             logits_processor = None
         # assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -338,18 +372,24 @@ class EaModel(nn.Module):
             # Reset the past key and value states
             current_length_data.zero_()
         else:
+            estimated_max_length = self._estimate_max_length()
+            if estimated_max_length is not None:
+                max_length = estimated_max_length
+                logger.info(f"Estimated max length set to {max_length}")
             (
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model,max_length=max_length)
+            ) = initialize_past_key_values(self.base_model, max_length=max_length)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
 
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
-        outputs = self.base_model(input_ids, past_key_values=past_key_values, use_cache=True)
+        outputs = self.base_model(
+            input_ids, past_key_values=past_key_values, use_cache=True
+        )
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
         for idx in range(max_length):
@@ -360,7 +400,9 @@ class EaModel(nn.Module):
                 input_id = torch.multinomial(probabilities, 1)
             else:
                 input_id = outputs.logits[:, -1:].argmax(dim=-1)
-            outputs = self.base_model(input_id, use_cache=True, past_key_values=past_key_values)
+            outputs = self.base_model(
+                input_id, use_cache=True, past_key_values=past_key_values
+            )
             input_ids = torch.cat([input_ids, input_id], dim=-1)
             new_token += 1
 
@@ -381,23 +423,23 @@ class EaModel(nn.Module):
 
     @torch.no_grad()
     def ea_generate(
-            self,
-            input_ids,
-            temperature=0.0,
-            top_p=0.0,
-            top_k=0.0,
-            max_new_tokens=512,
-            max_length=2048,
-            log=False,
-            is_llama3=False,
-
+        self,
+        input_ids,
+        temperature=0.0,
+        top_p=0.0,
+        top_k=0.0,
+        max_new_tokens=512,
+        max_length=2048,
+        log=False,
+        is_llama3=False,
     ):
         if is_llama3:
             stop_token_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
 
-
         if temperature > 1e-5:
-            logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
+            logits_processor = prepare_logits_processor(
+                temperature=temperature, top_p=top_p, top_k=top_k
+            )
         else:
             logits_processor = None
         # assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -415,20 +457,30 @@ class EaModel(nn.Module):
             # Reset the past key and value states
             current_length_data.zero_()
         else:
+            estimated_max_length = self._estimate_max_length()
+            if estimated_max_length is not None:
+                max_length = estimated_max_length
+                logger.info(f"Estimated max length set to {max_length}")
             (
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model,max_length=max_length)
+            ) = initialize_past_key_values(self.base_model, max_length=max_length)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
 
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
-        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, past_key_values, logits_processor
-        )
+        (
+            draft_tokens,
+            retrieve_indices,
+            tree_mask,
+            tree_position_ids,
+            logits,
+            hidden_state,
+            sample_token,
+        ) = initialize_tree(input_ids, self, past_key_values, logits_processor)
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
         for idx in range(max_length):
@@ -454,7 +506,16 @@ class EaModel(nn.Module):
             )
             # print(accept_length)
             # with Timer("update_inference_inputs"):
-            input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token, hidden_state, sample_token = update_inference_inputs(
+            (
+                input_ids,
+                draft_tokens,
+                retrieve_indices,
+                tree_mask,
+                tree_position_ids,
+                new_token,
+                hidden_state,
+                sample_token,
+            ) = update_inference_inputs(
                 input_ids,
                 candidates,
                 best_candidate,
@@ -466,7 +527,7 @@ class EaModel(nn.Module):
                 current_length_data,
                 self,
                 hidden_state_new,
-                sample_p
+                sample_p,
             )
 
             yield input_ids
@@ -484,23 +545,23 @@ class EaModel(nn.Module):
 
     @torch.no_grad()
     def naive_generate(
-            self,
-            input_ids,
-            temperature=0.0,
-            top_p=0.0,
-            top_k=0.0,
-            max_new_tokens=512,
-            max_length=2048,
-            log=False,
-            is_llama3=False,
-
+        self,
+        input_ids,
+        temperature=0.0,
+        top_p=0.0,
+        top_k=0.0,
+        max_new_tokens=512,
+        max_length=2048,
+        log=False,
+        is_llama3=False,
     ):
         if is_llama3:
             stop_token_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
 
-
         if temperature > 1e-5:
-            logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
+            logits_processor = prepare_logits_processor(
+                temperature=temperature, top_p=top_p, top_k=top_k
+            )
         else:
             logits_processor = None
         # assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -518,18 +579,24 @@ class EaModel(nn.Module):
             # Reset the past key and value states
             current_length_data.zero_()
         else:
+            estimated_max_length = self._estimate_max_length()
+            if estimated_max_length is not None:
+                max_length = estimated_max_length
+                logger.info(f"Estimated max length set to {max_length}")
             (
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model,max_length=max_length)
+            ) = initialize_past_key_values(self.base_model, max_length=max_length)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
 
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
-        outputs = self.base_model(input_ids, past_key_values=past_key_values, use_cache=True)
+        outputs = self.base_model(
+            input_ids, past_key_values=past_key_values, use_cache=True
+        )
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
         for idx in range(max_length):
@@ -541,7 +608,9 @@ class EaModel(nn.Module):
             else:
                 input_id = outputs.logits[:, -1:].argmax(dim=-1)
 
-            outputs = self.base_model(input_id, use_cache=True, past_key_values=past_key_values)
+            outputs = self.base_model(
+                input_id, use_cache=True, past_key_values=past_key_values
+            )
             input_ids = torch.cat([input_ids, input_id], dim=-1)
             new_token += 1
 
@@ -557,3 +626,8 @@ class EaModel(nn.Module):
                 break
             if input_ids.shape[1] > max_length:
                 break
+
+    def _estimate_max_length(self):
+        if isinstance(self.config, LlamaConfig):
+            return self.config.max_position_embeddings
+        return None
