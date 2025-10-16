@@ -247,7 +247,7 @@ def get_model_answers(
                 temperature=temperature,
                 log=True,
                 is_llama3=True,
-                max_new_tokens=120_000,
+                max_new_tokens=1024,
                 max_length=120_000,
             )
             torch.cuda.synchronize()
