@@ -106,6 +106,8 @@ def get_model_answers(
 ):
     # temperature = 0.0
 
+    print(args.load_in_8bit)
+
     model = EaModel.from_pretrained(
         base_model_path=base_model_path,
         ea_model_path=ea_model_path,
@@ -339,7 +341,7 @@ if __name__ == "__main__":
         help="1",
     )
     parser.add_argument(
-        "--load-in-8bit", action="store_false", help="Use 8-bit quantization"
+        "--load-in-8bit", action="store_true", help="Use 8-bit quantization"
     )
     parser.add_argument("--model-id", type=str, default="llama38b2_40")
     parser.add_argument(
